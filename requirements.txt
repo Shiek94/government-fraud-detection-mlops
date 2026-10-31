@@ -1,0 +1,7 @@
+#required libraries for this project
+numpy
+pandas
+scikit-learn
+matplotlib
+jupyter
+ipykernel

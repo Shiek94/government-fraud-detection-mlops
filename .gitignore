@@ -1,0 +1,24 @@
+
+# Python environment
+.venv/
+__pycache__/
+*.pyc
+
+# IDE
+.idea/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Local configuration and secrets
+.env
+.env.*
+
+# Generated datasets and model artifacts
+data/*
+models/
+
+# MLflow local artifacts
+mlruns/
+mlartifacts/
+mlflow.db
