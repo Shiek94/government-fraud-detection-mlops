@@ -45,10 +45,34 @@ The offline MLOps workflow enables automated model maintenance through periodic 
 
 ## 4. Monitoring and Security
 
-TODO: Describe operational monitoring, model monitoring,
-authentication, and data protection.
+## 4. Monitoring and Security
 
-## 5. Architecture Diagram
+### 4.1 Monitoring
+
+The system uses three complementary monitoring mechanisms:
+
+- **Service monitoring (Amazon CloudWatch):** Monitors API requests, execution times, error rates, and AWS Lambda failures to identify operational issues.
+- **Model monitoring (Python):** Detects changes in incoming feature distributions (data drift) and evaluates model performance using verified fraud labels when available.
+- **Experiment tracking (MLflow):** Records model parameters, evaluation metrics, training runs, and artifacts to support reproducibility and model version tracking.
+
+Significant data drift can initiate retraining through GitHub Actions. Model evaluation determines whether a newly trained model is suitable for deployment.
+
+### 4.2 Security and Data Protection
+
+The prediction API is accessible only to authorized clients. HTTPS protects data during transmission, while API authentication restricts access to prediction functionality.
+
+AWS IAM permissions follow the principle of least privilege. Amazon S3 buckets containing application datasets and model artifacts are not publicly accessible.
+
+Credentials and secrets are excluded from the source repository. Application logging avoids recording sensitive applicant information unnecessarily.
+
+The project exclusively uses synthetic application data. Fraud predictions represent estimated risk and do not automatically establish fraud or reject an application. Flagged cases are intended for authorized human review.
+
+### 4.3 Failure Handling
+
+Unsuccessful retraining or model evaluation does not replace the currently deployed model. The existing prediction service remains operational, and failures are recorded for investigation.
+
+If the prediction API becomes unavailable, the conceptual design allows the agency's existing backend to retain applications for later screening. A complete asynchronous retry mechanism is outside the scope of this demonstration.
+
 ## 5. Architecture Diagram
 
 ### 5.1 Online Inference Architecture
