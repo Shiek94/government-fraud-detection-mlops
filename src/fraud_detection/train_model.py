@@ -1,3 +1,4 @@
+import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 import pandas as pd
@@ -6,6 +7,9 @@ from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.pipeline import Pipeline
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score, confusion_matrix)
+import joblib
+from pathlib import Path
+
 
 
 # Generate training dataset
@@ -42,14 +46,12 @@ pipeline = Pipeline([
 ])
 
 
-
-
 if __name__ == "__main__":
     # apply the pipeline
-    pipeline.fit(X_train_small, y_train_small)
+    """pipeline.fit(X_train_small, y_train_small)
     y_prob = pipeline.predict_proba(X_validation)[:, 1]
     print(y_prob[:10])
-    print("Maximum predicted probability:", y_prob.max())
+    print("Maximum predicted probability:", y_prob.max())"""
 
     # scout for the best performing classification threshold percentage
     """for threshold in [0.1, 0.15, 0.2, 0.25, 0.3]:
@@ -70,10 +72,23 @@ if __name__ == "__main__":
         print(f"confusion matrix:{conf_matrix}")"""
 
     # chose 0.25 as best performing classification threshold
+    model_version = "1.0.0"
     threshold = 0.25
 
-    # fit the pipeline on the whole training set
+    # fit the pipeline on the whole training set & save it
     pipeline.fit(X_train, y_train)
+
+    project_root = Path(__file__).resolve().parents[2]
+    model_path = project_root/"models"/"fraud_model.joblib"
+    model_path.parent.mkdir(parents=True, exist_ok=True)
+    pipeline_dict = {
+        "model_version": model_version,
+        "threshold": threshold,
+        "pipeline": pipeline
+    }
+
+    joblib.dump(pipeline_dict, model_path)
+    loaded_pipeline_dict = joblib.load(model_path)
 
     # calculate binary labels from predicted probabilities
     y_prob = pipeline.predict_proba(X_test)[:, 1]
@@ -92,3 +107,7 @@ if __name__ == "__main__":
     print(f"recall: {recall}")
     print(f"f1 score: {f1}")
     print(f"confusion matrix:{conf_matrix}")
+
+    original_model_proba = pipeline.predict_proba(X_test)
+    loaded_model_proba = loaded_pipeline_dict["pipeline"].predict_proba(X_test)
+    print(np.allclose(original_model_proba, loaded_model_proba))
