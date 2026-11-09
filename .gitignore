@@ -16,7 +16,7 @@ __pycache__/
 
 # Generated datasets and model artifacts
 data/*
-models/
+models/*
 
 # MLflow local artifacts
 mlruns/

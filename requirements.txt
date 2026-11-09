@@ -7,3 +7,6 @@ jupyter
 ipykernel
 fastapi
 uvicorn
+joblib
+pytest
+httpx
