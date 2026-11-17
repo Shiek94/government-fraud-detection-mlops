@@ -14,9 +14,14 @@ class ApplicationInput(BaseModel):
 
 # Build path to saved model & load it
 project_root = Path(__file__).resolve().parents[2]
+approved_model_path = project_root / "models" / "fraud_model_approved.joblib"
 model_path = project_root/"models"/"fraud_model.joblib"
 
-artifact = joblib.load(model_path)
+if approved_model_path.exists():
+    artifact = joblib.load(approved_model_path)
+else:
+    artifact = joblib.load(model_path)
+
 model = artifact["pipeline"]
 threshold = artifact["threshold"]
 model_version = artifact["model_version"]

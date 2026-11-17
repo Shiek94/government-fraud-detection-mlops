@@ -9,8 +9,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score, confusion_matrix)
 import joblib
 from pathlib import Path
-
-
+import mlflow
 
 # Generate training dataset
 historical_df = generate_applications(n_samples=2000, seed=100, month="2025-12")
@@ -40,9 +39,10 @@ preprocessor = ColumnTransformer(
 )
 
 # create the pipeline
+max_depth = 3
 pipeline = Pipeline([
     ("Preprocessor", preprocessor),
-    ("Classifier", DecisionTreeClassifier(max_depth=3, random_state=42))
+    ("Classifier", DecisionTreeClassifier(max_depth=max_depth, random_state=42))
 ])
 
 
@@ -111,3 +111,16 @@ if __name__ == "__main__":
     original_model_proba = pipeline.predict_proba(X_test)
     loaded_model_proba = loaded_pipeline_dict["pipeline"].predict_proba(X_test)
     print(np.allclose(original_model_proba, loaded_model_proba))
+
+    # Initial Mlflow setup
+    tracking_db_path = project_root / "mlflow.db"
+    mlflow.set_tracking_uri(f"sqlite:///{tracking_db_path.as_posix()}")
+    mlflow.set_experiment("government-fraud-detection")
+
+    # Create an MLflow run
+    with mlflow.start_run(run_name="baseline-v1"):
+        mlflow.log_param("threshold", threshold)
+        mlflow.log_param("max_depth", max_depth)
+        mlflow.log_metric("test_recall", recall)
+        mlflow.log_metric("test_f1", f1)
+        mlflow.log_artifact(str(model_path), artifact_path="model")

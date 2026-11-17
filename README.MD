@@ -22,3 +22,7 @@ The project uses synthetic application data and runs locally, with cloud deploym
 ## Status
 
 Project initialization and conceptual architecture design.
+
+## Starting mlflow Server
+python -m mlflow server --backend-store-uri sqlite:///mlflow.db --host 127.0.0.1 --port 5000
+python -m uvicorn fraud_detection.api:app --app-dir src --reload
