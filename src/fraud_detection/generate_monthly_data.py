@@ -2,7 +2,6 @@ import pandas as pd
 from pathlib import Path
 from data_generation import generate_applications
 
-
 # Generate 12 different month worth of synthetic data with differing seeds and request_multipliers
 def generate_yearly_data():
     # Initialize an empty df list

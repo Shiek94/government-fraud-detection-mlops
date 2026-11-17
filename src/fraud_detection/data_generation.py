@@ -1,5 +1,4 @@
 # Generation of a synthetic dataset for fraud detection
-
 import numpy as np
 import pandas as pd
 

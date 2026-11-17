@@ -1,5 +1,5 @@
 from fastapi.testclient import TestClient
-from fraud_detection.api import app
+from fraud_detection.api import app, model_version
 
 # Test API health
 def test_health():
@@ -27,6 +27,7 @@ def test_predict_valid_application():
     assert isinstance(result["flagged_for_review"], bool)
     assert isinstance(result["model_version"], str)
     assert len(result["model_version"]) > 0
+    assert result["model_version"] == model_version
 
 def test_predict_invalid_application():
     application = {
