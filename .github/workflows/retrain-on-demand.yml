@@ -1,0 +1,74 @@
+name: On-Demand Model Retraining
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: fraud-retraining
+  cancel-in-progress: false
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+
+    env:
+      PYTHONPATH: src
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::487192702559:role/GovernmentFraudGitHubActionsRole
+          aws-region: eu-central-1
+
+      - name: Restore checkpoints from S3
+        run: |
+          mkdir -p models/checkpoints
+          aws s3 sync s3://government-fraud-mlops-iu-project/checkpoints/ models/checkpoints/
+
+      - name: Restore MLflow state
+        run: |
+          mkdir -p mlflow_restore
+          aws s3 sync s3://government-fraud-mlops-iu-project/mlflow/ mlflow_restore/
+          if [ -f "mlflow_restore/mlflow.db" ]; then
+            cp mlflow_restore/mlflow.db ./mlflow.db
+          fi
+          if [ -d "mlflow_restore/mlruns/" ]; then
+            cp -a mlflow_restore/mlruns .
+          fi
+
+      - name: Resume monthly retraining
+        run: python -m fraud_detection.resume_training
+
+      - name: Persist MLflow state
+        run: |
+          aws s3 cp mlflow.db s3://government-fraud-mlops-iu-project/mlflow/mlflow.db
+          if [ -d "mlruns/" ]; then
+            aws s3 sync mlruns/ s3://government-fraud-mlops-iu-project/mlflow/mlruns/
+          fi
+
+      - name: Persist approved model to S3
+        run: |
+          if [ -f "models/fraud_model_approved.joblib" ]; then
+            aws s3 cp models/fraud_model_approved.joblib s3://government-fraud-mlops-iu-project/models/fraud_model_approved.joblib
+          else
+            echo "No model promotion this month"
+          fi
+
+      - name: Persist checkpoints to S3
+        run: aws s3 sync models/checkpoints/ s3://government-fraud-mlops-iu-project/checkpoints/
