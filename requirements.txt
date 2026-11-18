@@ -11,3 +11,4 @@ joblib
 pytest
 httpx
 mlflow
+mangum==0.22.0
