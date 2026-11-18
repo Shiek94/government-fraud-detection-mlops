@@ -47,6 +47,10 @@ else:
 
 next_training_month = f"{year}-{month_number:02d}"
 
+if year > 2026:
+    print("Simulation completed. No further retraining required.")
+    raise SystemExit(0)
+
 print(next_training_month)
 
 # Generate applications
