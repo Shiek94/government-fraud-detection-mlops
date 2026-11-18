@@ -4,6 +4,8 @@ from typing import Literal
 import pandas as pd
 import joblib
 from pathlib import Path
+import os
+from io import BytesIO
 
 class ApplicationInput(BaseModel):
     monthly_income: int = Field(ge=0)
@@ -17,8 +19,22 @@ project_root = Path(__file__).resolve().parents[2]
 approved_model_path = project_root / "models" / "fraud_model_approved.joblib"
 model_path = project_root/"models"/"fraud_model.joblib"
 
-if approved_model_path.exists():
+model_bucket = os.getenv("MODEL_S3_BUCKET")
+
+if model_bucket:
+    import boto3
+
+    s3 = boto3.client("s3", region_name="eu-central-1")
+    response = s3.get_object(
+        Bucket=model_bucket,
+        Key="models/fraud_model_approved.joblib"
+    )
+
+    artifact = joblib.load(BytesIO(response["Body"].read()))
+
+elif approved_model_path.exists():
     artifact = joblib.load(approved_model_path)
+
 else:
     artifact = joblib.load(model_path)
 

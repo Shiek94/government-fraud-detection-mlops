@@ -1,0 +1,25 @@
+version: 1.0
+runtime: python311
+
+build:
+  commands:
+    build:
+      - python3 -m compileall -q src
+
+run:
+  runtime-version: 3.11
+
+  pre-run:
+    - pip3 install -r requirements-api.txt
+
+  command: python3 -m uvicorn fraud_detection.api:app --host 0.0.0.0 --port 8080
+
+  network:
+    port: 8080
+
+  env:
+    - name: PYTHONPATH
+      value: src
+
+    - name: MODEL_S3_BUCKET
+      value: government-fraud-mlops-iu-project
