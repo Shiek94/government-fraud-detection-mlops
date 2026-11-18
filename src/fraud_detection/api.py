@@ -6,6 +6,7 @@ import joblib
 from pathlib import Path
 import os
 from io import BytesIO
+from mangum import Mangum
 
 class ApplicationInput(BaseModel):
     monthly_income: int = Field(ge=0)
@@ -75,6 +76,8 @@ def predict_fraud(application: ApplicationInput):
         "flagged_for_review": flagged_for_review,
         "model_version": model_version
     }
+
+handler = Mangum(app, lifespan="off")
 
 
 
