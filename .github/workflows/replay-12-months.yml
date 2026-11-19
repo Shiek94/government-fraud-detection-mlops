@@ -1,0 +1,178 @@
+name: Automated 12-Month Fraud Replay
+
+on:
+  workflow_dispatch:
+
+  schedule:
+    - cron: "2-59/5 * * * *"
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: government-fraud-12-month-replay
+  cancel-in-progress: false
+
+jobs:
+  replay:
+    if: ${{ vars.FRAUD_REPLAY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    env:
+      PYTHONPATH: src
+      REPLAY_WORKSPACE: ${{ github.workspace }}/data/replay_workspace
+      REPLAY_BUCKET: government-fraud-mlops-iu-project
+      REPLAY_MODEL_KEY: models/replay-2026/fraud_model_approved.joblib
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt
+
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::487192702559:role/GovernmentFraudGitHubActionsRole
+          aws-region: eu-central-1
+
+      - name: Restore replay state from S3
+        run: |
+          mkdir -p "$REPLAY_WORKSPACE/models/checkpoints"
+
+          aws s3 sync \
+            "s3://$REPLAY_BUCKET/checkpoints/replay-2026/" \
+            "$REPLAY_WORKSPACE/models/checkpoints/"
+
+          aws s3 sync \
+            "s3://$REPLAY_BUCKET/mlflow/replay-2026/" \
+            "$REPLAY_WORKSPACE/"
+
+          aws s3 sync \
+            "s3://$REPLAY_BUCKET/models/replay-2026/" \
+            "$REPLAY_WORKSPACE/models/"
+
+      - name: Process next simulated month
+        id: training
+        run: |
+          if [ -f "$REPLAY_WORKSPACE/models/checkpoints/checkpoint_2026-12.joblib" ]; then
+            echo "Simulation already completed."
+            echo "advanced=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          shopt -s nullglob
+          checkpoints=("$REPLAY_WORKSPACE"/models/checkpoints/checkpoint_*.joblib)
+
+          if [ ${#checkpoints[@]} -eq 0 ]; then
+            echo "No checkpoint found. Initializing baseline."
+
+            if [ -f "$REPLAY_WORKSPACE/models/fraud_model_approved.joblib" ] || \
+               [ -f "$REPLAY_WORKSPACE/mlflow.db" ]; then
+              echo "ERROR: Replay state exists without a checkpoint."
+              exit 1
+            fi
+
+            python -m fraud_detection.train_model
+          fi
+
+          python -m fraud_detection.resume_training
+
+          echo "advanced=true" >> "$GITHUB_OUTPUT"
+
+      - name: Persist replay state to S3
+        if: ${{ steps.training.outputs.advanced == 'true' }}
+        run: |
+          test -f "$REPLAY_WORKSPACE/models/fraud_model_approved.joblib"
+          test -f "$REPLAY_WORKSPACE/mlflow.db"
+
+          aws s3 cp \
+            "$REPLAY_WORKSPACE/models/fraud_model_approved.joblib" \
+            "s3://$REPLAY_BUCKET/$REPLAY_MODEL_KEY"
+
+          aws s3 sync \
+            "$REPLAY_WORKSPACE/mlruns/" \
+            "s3://$REPLAY_BUCKET/mlflow/replay-2026/mlruns/"
+
+          aws s3 cp \
+            "$REPLAY_WORKSPACE/mlflow.db" \
+            "s3://$REPLAY_BUCKET/mlflow/replay-2026/mlflow.db"
+
+          aws s3 sync \
+            "$REPLAY_WORKSPACE/models/checkpoints/" \
+            "s3://$REPLAY_BUCKET/checkpoints/replay-2026/"
+
+          LATEST_CHECKPOINT=$(ls "$REPLAY_WORKSPACE/models/checkpoints"/checkpoint_*.joblib | sort | tail -n 1)
+
+          echo "Replay advanced to $(basename "$LATEST_CHECKPOINT" .joblib)" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Refresh Lambda with replay model
+        if: ${{ steps.training.outputs.advanced == 'true' }}
+        run: |
+          CURRENT_VARS=$(aws lambda get-function-configuration \
+            --function-name government-fraud-api \
+            --query 'Environment.Variables' \
+            --output json)
+
+          UPDATED_VARS=$(echo "$CURRENT_VARS" | jq -c \
+            --arg model_key "$REPLAY_MODEL_KEY" \
+            --arg revision "$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT" \
+            '.MODEL_S3_KEY = $model_key | .MODEL_REVISION = $revision')
+
+          aws lambda update-function-configuration \
+            --function-name government-fraud-api \
+            --environment "{\"Variables\":$UPDATED_VARS}"
+
+          aws lambda wait function-updated \
+            --function-name government-fraud-api
+
+          ACTUAL_MODEL_KEY=$(aws lambda get-function-configuration \
+            --function-name government-fraud-api \
+            --query 'Environment.Variables.MODEL_S3_KEY' \
+            --output text)
+
+          test "$ACTUAL_MODEL_KEY" = "$REPLAY_MODEL_KEY"
+
+          echo "Lambda configuration refreshed successfully."
+
+      - name: Verify authenticated replay API
+        if: ${{ steps.training.outputs.advanced == 'true' }}
+        env:
+          API_BASE_URL: https://q6chp4f4c76oyciex6f2gcictq0qjwqj.lambda-url.eu-central-1.on.aws
+        run: |
+          health=$(curl --fail-with-body --silent --show-error \
+            --max-time 75 \
+            --aws-sigv4 "aws:amz:eu-central-1:lambda" \
+            --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+            -H "X-Amz-Security-Token: $AWS_SESSION_TOKEN" \
+            "$API_BASE_URL/health")
+
+          echo "Health response: $health"
+          echo "$health" | jq -e '.status == "OK"'
+
+          prediction=$(curl --fail-with-body --silent --show-error \
+            --max-time 75 \
+            --aws-sigv4 "aws:amz:eu-central-1:lambda" \
+            --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+            -H "X-Amz-Security-Token: $AWS_SESSION_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d '{"monthly_income":1800,"requested_amount":5000,"household_size":3,"previous_applications":2,"employment_status":"unemployed"}' \
+            "$API_BASE_URL/predict")
+
+          echo "Prediction response: $prediction"
+
+          EXPECTED_VERSION=$(python -c "import joblib, os; p=os.path.join(os.environ['REPLAY_WORKSPACE'], 'models', 'fraud_model_approved.joblib'); print(joblib.load(p)['model_version'])")
+
+          echo "$prediction" | jq -e \
+            --arg expected "$EXPECTED_VERSION" \
+            '.model_version == $expected and (.fraud_probability | type == "number")'
+
+          echo "Authenticated prediction verified for model $EXPECTED_VERSION."
