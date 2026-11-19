@@ -47,3 +47,17 @@ jobs:
             --function-name government-fraud-api
 
           echo "Lambda model refresh completed successfully"
+
+      - name: Verify authenticated REST API
+        env:
+          API_HEALTH_URL: https://q6chp4f4c76oyciex6f2gcictq0qjwqj.lambda-url.eu-central-1.on.aws/health
+        run: |
+          response=$(curl --fail-with-body --silent --show-error \
+            --max-time 75 \
+            --aws-sigv4 "aws:amz:eu-central-1:lambda" \
+            --user "$AWS_ACCESS_KEY_ID:$AWS_SECRET_ACCESS_KEY" \
+            -H "X-Amz-Security-Token: $AWS_SESSION_TOKEN" \
+            "$API_HEALTH_URL")
+
+          echo "Authenticated health response: $response"
+          echo "$response" | jq -e '.status == "OK"'
