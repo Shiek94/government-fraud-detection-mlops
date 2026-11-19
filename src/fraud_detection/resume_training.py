@@ -7,9 +7,22 @@ from fraud_detection.data_generation import generate_applications
 from sklearn.base import clone
 from sklearn.metrics import f1_score
 import mlflow
+import os
 
 # Construct project & checkpoint path
-project_root = Path(__file__).resolve().parents[2]
+default_project_root = Path(__file__).resolve().parents[2]
+
+replay_workspace = os.getenv("REPLAY_WORKSPACE")
+
+if replay_workspace:
+    project_root = Path(replay_workspace).resolve()
+
+    if project_root == default_project_root:
+        raise ValueError(
+            "Replay workspace must be separate from the project root."
+        )
+else:
+    project_root = default_project_root
 
 checkpoint_dir = project_root / "models" / "checkpoints"
 checkpoint_files = list(checkpoint_dir.glob("checkpoint_*.joblib"))
@@ -28,6 +41,13 @@ checkpoint_df = checkpoint["cumulative_training_df"]
 checkpoint_pipeline = checkpoint["current_pipeline"]
 checkpoint_threshold = checkpoint["threshold"]
 checkpoint_model_version = checkpoint["current_model_version"]
+
+reference_requested_mean = checkpoint.get(
+    "reference_requested_mean",
+    checkpoint_df["requested_amount"].mean()
+)
+
+drift_threshold = 0.25
 
 print(f"Training observations: {checkpoint_df.shape[0]}")
 print(f"Current approved model: {checkpoint_model_version}")
@@ -55,6 +75,15 @@ print(next_training_month)
 
 # Generate applications
 monthly_applications = generate_applications(n_samples=1000, seed=month_number, month=next_training_month, request_multiplier=1.5 if month_number >= 7 else 1.0)
+
+monthly_requested_mean = monthly_applications["requested_amount"].mean()
+
+relative_change = (
+    abs(monthly_requested_mean - reference_requested_mean)
+    / reference_requested_mean
+)
+
+drift_detected = relative_change >= drift_threshold
 
 # Split the data
 X = monthly_applications[["monthly_income", "requested_amount", "household_size", "previous_applications", "employment_status"]]
@@ -122,7 +151,8 @@ checkpoint_dict = {
     "current_pipeline": current_pipeline,
     "current_model_version": current_model_version,
     "threshold": checkpoint_threshold,
-    "month": next_training_month
+    "month": next_training_month,
+    "reference_requested_mean": reference_requested_mean,
 }
 
 # Construct Checkpoint saving paths
@@ -161,12 +191,23 @@ with mlflow.start_run(run_name=f"resume-{next_training_month}"):
     mlflow.log_param("Month", next_training_month)
     mlflow.log_param("Training_rows", cumulative_checkpoint_df.shape[0])
     mlflow.log_param("Threshold", checkpoint_threshold)
+    mlflow.log_param("Drift_threshold", drift_threshold)
+    mlflow.log_param("Reference_requested_mean", reference_requested_mean)
     mlflow.log_metric("Current F1", current_f1)
     mlflow.log_metric("Candidate F1", candidate_f1)
+    mlflow.log_metric("Average requested amount", monthly_requested_mean)
+    mlflow.log_metric("Relative requested amount change", relative_change)
     mlflow.set_tag("Promotion decision", "Promoted" if promotion else "Denied")
     mlflow.set_tag("Previous_approved_version", checkpoint_model_version)
     mlflow.set_tag("Current_approved_version", current_model_version)
+    mlflow.set_tag("Requested amount drift detected", str(drift_detected))
     mlflow.log_artifact(str(candidate_checkpoint_path), artifact_path="model")
+
+print(
+    f"{next_training_month} | "
+    f"Relative change: {relative_change:.2%} | "
+    f"Drift detected: {drift_detected}"
+)
 
 # Update serving artifact if promoted
 if promotion:

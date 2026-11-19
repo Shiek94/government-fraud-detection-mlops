@@ -21,6 +21,10 @@ approved_model_path = project_root / "models" / "fraud_model_approved.joblib"
 model_path = project_root/"models"/"fraud_model.joblib"
 
 model_bucket = os.getenv("MODEL_S3_BUCKET")
+model_key = os.getenv(
+    "MODEL_S3_KEY",
+    "models/fraud_model_approved.joblib"
+)
 
 if model_bucket:
     import boto3
@@ -28,7 +32,7 @@ if model_bucket:
     s3 = boto3.client("s3", region_name="eu-central-1")
     response = s3.get_object(
         Bucket=model_bucket,
-        Key="models/fraud_model_approved.joblib"
+        Key=model_key
     )
 
     artifact = joblib.load(BytesIO(response["Body"].read()))

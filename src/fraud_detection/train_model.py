@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.tree import DecisionTreeClassifier
 import pandas as pd
-from data_generation import generate_applications
+from fraud_detection.data_generation import generate_applications
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import OneHotEncoder
 from sklearn.pipeline import Pipeline
@@ -10,6 +10,7 @@ from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_s
 import joblib
 from pathlib import Path
 import mlflow
+import os
 
 # Generate training dataset
 historical_df = generate_applications(n_samples=2000, seed=100, month="2025-12")
@@ -78,8 +79,21 @@ if __name__ == "__main__":
     # fit the pipeline on the whole training set & save it
     pipeline.fit(X_train, y_train)
 
-    project_root = Path(__file__).resolve().parents[2]
-    model_path = project_root/"models"/"fraud_model.joblib"
+    default_project_root = Path(__file__).resolve().parents[2]
+
+    replay_workspace = os.getenv("REPLAY_WORKSPACE")
+
+    if replay_workspace:
+        project_root = Path(replay_workspace).resolve()
+
+        if project_root == default_project_root:
+            raise ValueError("Replay workspace must be separate from the project root.")
+    else:
+        project_root = default_project_root
+
+    model_path = project_root / "models" / "fraud_model.joblib"
+
+
     model_path.parent.mkdir(parents=True, exist_ok=True)
     pipeline_dict = {
         "model_version": model_version,
@@ -87,8 +101,34 @@ if __name__ == "__main__":
         "pipeline": pipeline
     }
 
+    if replay_workspace:
+        checkpoint_path = (
+                project_root / "models" / "checkpoints" / "checkpoint_2025-12.joblib"
+        )
+        approved_model_path = project_root / "models" / "fraud_model_approved.joblib"
+
+        for path in (model_path, checkpoint_path, approved_model_path):
+            if path.exists():
+                raise FileExistsError(
+                    f"Replay initialization artifact already exists: {path}"
+                )
+
     joblib.dump(pipeline_dict, model_path)
     loaded_pipeline_dict = joblib.load(model_path)
+
+    if replay_workspace:
+        checkpoint_dict = {
+            "cumulative_training_df": historical_df.loc[X_train.index].copy(),
+            "current_pipeline": pipeline,
+            "current_model_version": model_version,
+            "threshold": threshold,
+            "month": "2025-12"
+        }
+
+        checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
+
+        joblib.dump(checkpoint_dict, checkpoint_path)
+        joblib.dump(pipeline_dict, approved_model_path)
 
     # calculate binary labels from predicted probabilities
     y_prob = pipeline.predict_proba(X_test)[:, 1]
@@ -115,7 +155,20 @@ if __name__ == "__main__":
     # Initial Mlflow setup
     tracking_db_path = project_root / "mlflow.db"
     mlflow.set_tracking_uri(f"sqlite:///{tracking_db_path.as_posix()}")
-    mlflow.set_experiment("government-fraud-detection")
+
+    experiment_name = "government-fraud-detection"
+
+    if replay_workspace:
+        artifact_dir = project_root / "mlruns"
+        artifact_dir.mkdir(parents=True, exist_ok=True)
+
+        if mlflow.get_experiment_by_name(experiment_name) is None:
+            mlflow.create_experiment(
+                name=experiment_name,
+                artifact_location=artifact_dir.resolve().as_uri()
+            )
+
+    mlflow.set_experiment(experiment_name)
 
     # Create an MLflow run
     with mlflow.start_run(run_name="baseline-v1"):
