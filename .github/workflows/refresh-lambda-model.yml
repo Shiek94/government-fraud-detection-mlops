@@ -1,0 +1,49 @@
+name: Refresh Lambda Model
+
+on:
+  workflow_dispatch:
+
+  workflow_run:
+    workflows: ["On-Demand Model Retraining"]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: lambda-model-refresh
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Authenticate to AWS
+        uses: aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          role-to-assume: arn:aws:iam::487192702559:role/GovernmentFraudGitHubActionsRole
+          aws-region: eu-central-1
+
+      - name: Refresh Lambda configuration
+        run: |
+          CURRENT_VARS=$(aws lambda get-function-configuration \
+            --function-name government-fraud-api \
+            --query 'Environment.Variables' \
+            --output json)
+
+          UPDATED_VARS=$(echo "$CURRENT_VARS" | jq -c \
+            --arg revision "$GITHUB_RUN_ID" \
+            '.MODEL_REVISION = $revision')
+
+          aws lambda update-function-configuration \
+            --function-name government-fraud-api \
+            --environment "{\"Variables\":$UPDATED_VARS}"
+
+          aws lambda wait function-updated \
+            --function-name government-fraud-api
+
+          echo "Lambda model refresh completed successfully"
