@@ -16,7 +16,7 @@ concurrency:
 
 jobs:
   replay:
-    if: ${{ vars.FRAUD_REPLAY_ENABLED == 'true' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.FRAUD_REPLAY_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     timeout-minutes: 30
 
